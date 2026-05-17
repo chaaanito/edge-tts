@@ -3,6 +3,7 @@ import cors from "cors";
 import fs from "fs";
 import path from "path";
 import { EdgeTTS } from "node-edge-tts";
+import PocketBase from "pocketbase";
 
 const app = express();
 app.use(cors());
@@ -13,7 +14,31 @@ if (!fs.existsSync(TEMP_DIR)) {
   fs.mkdirSync(TEMP_DIR);
 }
 
-app.post("/api/tts", async (req, res) => {
+async function checkPbAuth(req, res, next) {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ error: "Unauthorized: Missing token" });
+    }
+
+    const token = authHeader.split(" ")[1];
+
+    const collectionName = req.body.collectionName || "0_AUTH_ADMIN";
+
+    const pb = new PocketBase("http://pocketbase:8090");
+    pb.authStore.save(token, null);
+
+    await pb.collection(collectionName).authRefresh();
+
+    next();
+  } catch (err) {
+    return res
+      .status(401)
+      .json({ error: "Unauthorized: Invalid or expired token" });
+  }
+}
+
+app.post("/api/tts", checkPbAuth, async (req, res) => {
   try {
     const {
       text,
@@ -25,6 +50,7 @@ app.post("/api/tts", async (req, res) => {
       outputFormat = "audio-24khz-48kbitrate-mono-mp3",
       saveSubtitles = false,
       timeout = 10000,
+      collectionName,
     } = req.body;
 
     if (!text || typeof text !== "string") {
